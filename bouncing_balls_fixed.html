@@ -1,4 +1,6 @@
 <!-- 
+  Author - Shashwat Srivastava (https://github.com/shashwatsr2712)
+
   Orginal "bouncing balls" code: https://bl.ocks.org/HarryStevens/e2f49170367bbc10644ecb81f0e6dc54
   This code was referred to in washington post's epidemic simulation
   
@@ -10,253 +12,436 @@
 -->
 <!DOCTYPE html>
 <html>
-<head>
-  <style>
-    body {
-      margin: 0;
-      overflow: hidden;
-    }
-  </style>
-</head>
-<body>
-  <div id="simulation"></div>
-  <script src="https://d3js.org/d3-random.v1.min.js"></script>
-  <script src="https://unpkg.com/geometric@2/build/geometric.min.js"></script>
-  <script>
+  <head>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      #form-sim .form-group,
+      .form-control {
+        margin-right: 5px;
+      }
+      #form-sim {
+        padding: 10px;
+      }
+      #resetButton {
+        position: fixed;
+        bottom: 0;
+        right: 0;
+        color: white;
+        border-width: 2px;
+      }
+      #resetButton:hover {
+        color: black;
+      }
+      label {
+        font-weight: bold;
+      }
+      .slider {
+        -webkit-appearance: none;
+        height: 10px;
+        background-color: #d3d3d3;
+        outline: none;
+        opacity: 0.7;
+        -webkit-transition: 0.2s;
+        transition: opacity 0.2s;
+      }
+      .slider:hover {
+        opacity: 1;
+      }
+      .slider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 25px;
+        height: 25px;
+        border-radius: 50%;
+        background: #0084ff;
+        cursor: pointer;
+      }
+      .slider::-moz-range-thumb {
+        width: 25px;
+        height: 25px;
+        background: #0084ff;
+        cursor: pointer;
+      }
+    </style>
 
-  // The Simulation class
-  class Simulation {
-    // Initialize the simulation parameters
-    init(opts){
-      this.width = opts && opts.width ? opts.width : innerWidth;
-      this.height = opts && opts.height ? opts.height : innerHeight;
-      this.center = [this.width / 2, this.height / 2];
-      this.data = [];
-      
-      return this;
-    }
-    
-    // Add elements (balls) each with a set of properties 
-    add(datum){
-      const d = datum;
-      d.pos = d.pos || [this.width / 2, this.height / 2];
-      d.radius = d.radius || 5;
-      d.angle = d.angle || 0;
-      // d.speed = d.speed;
-      d.color = d.color || "steelblue";
-      // d.fixed = d.fixed;
+    <!-- Bootstrap 4 CSS -->
+    <link
+      rel="stylesheet"
+      href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css"
+      integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm"
+      crossorigin="anonymous"
+    />
+  </head>
 
-      // this is meaningful only for infected individuals (color=red)
-      // we have just kept it -1 otherwise
-      // d.infected_for = d.infected_for;
-      
-      this.data.push(d);
-      
-      return this;
-    }
-    
-    // This is called for each time instant
-    // Collisions are detected in this function
-    // and parameters of balls are changed accordingly
-    tick(time_instant){
-      // Loop through the data
-      for (let i = 0; i < this.data.length; i++){
-        const d = this.data[i];
-        if(d.color=='red'){
-          if(d.infected_for>600){ // time to recover
-            d.color='green';
-            d.infected_for=-1;
-          } else{
-            d.infected_for+=1;
-          }
+  <body>
+    <!-- Button to reset defaults -->
+    <button
+      id="resetButton"
+      class="btn btn-outline-warning"
+      onclick="resetDefaults()"
+    >
+      Reset defaults
+    </button>
+
+    <div id="form-sim">
+      <form
+        class="form-inline"
+        onsubmit="return modifySIM(document.getElementById('people').value,document.getElementById('infectionp').value,document.getElementById('fractionfixed').value)"
+      >
+        <div class="form-group">
+          <label for="people">Population (50-250)</label>&nbsp;
+          <input
+            class="slider"
+            id="people"
+            type="range"
+            min="50"
+            max="250"
+            step="25"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="infectionp">Infection period (100-1000)</label>&nbsp;
+          <input
+            class="slider"
+            id="infectionp"
+            type="range"
+            min="100"
+            max="1000"
+            step="100"
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="fractionfixed">Fraction fixed (0.1-0.9)</label>&nbsp;
+          <input
+            class="slider"
+            id="fractionfixed"
+            type="range"
+            min="0.1"
+            max="0.9"
+            step="0.1"
+          />
+        </div>
+
+        &nbsp;<button type="submit" class="btn btn-sm btn-outline-info">
+          Refresh SIM
+        </button>
+      </form>
+    </div>
+
+    <!-- Simulation -->
+    <div id="simulation"></div>
+    <script src="https://d3js.org/d3-random.v1.min.js"></script>
+    <script src="https://unpkg.com/geometric@2/build/geometric.min.js"></script>
+    <script>
+      // Default values of parameters
+      var num_balls_default = 150,
+        infected_for_default = 600,
+        fraction_fixed_default = 0.5;
+
+      // Some changeable parameters
+      var num_balls_g = num_balls_default,
+        infected_for_g = infected_for_default,
+        fraction_fixed_g = fraction_fixed_default;
+
+      // The Simulation class
+      class Simulation {
+        // Initialize the simulation parameters
+        init(opts) {
+          // height of above form div
+          let otherHeight = document.getElementById("form-sim").offsetHeight;
+
+          this.width = opts && opts.width ? opts.width : innerWidth;
+          this.height =
+            opts && opts.height ? opts.height : innerHeight - otherHeight;
+          this.center = [this.width / 2, this.height / 2];
+          this.data = [];
+
+          return this;
         }
-        d.collided = false;
 
-        // Detect collisions
-        for (let i0 = 0; i0 < this.data.length; i0++){
-          const d0 = this.data[i0];
-          d0.collided = false;
+        // Add elements (balls) each with a set of properties
+        add(datum) {
+          const d = datum;
+          d.pos = d.pos || [this.width / 2, this.height / 2];
+          d.radius = d.radius || 5;
+          d.angle = d.angle || 0;
+          // d.speed = d.speed;
+          d.color = d.color || "steelblue";
+          // d.fixed = d.fixed;
 
-          // Collision!
-          if (i !== i0 && geometric.lineLength([d.pos, d0.pos]) < d.radius + d0.radius && !d.collided && !d0.collided){
-            
-            // To avoid having them stick to each other,
-            // test if moving them in each other's angles will bring them closer or farther apart
-            // If one of them is fixed, swap just the angles
-            const keep = geometric.lineLength([
-                    geometric.pointTranslate(d.pos, d.angle, d.speed),
-                    geometric.pointTranslate(d0.pos, d0.angle, d0.speed)
-                  ]),
-                  swap = (d.fixed||d0.fixed)?geometric.lineLength([
-                    geometric.pointTranslate(d.pos, d0.angle, d.speed),
-                    geometric.pointTranslate(d0.pos, d.angle, d0.speed)
-                  ]):
-                  geometric.lineLength([
-                    geometric.pointTranslate(d.pos, d0.angle, d0.speed),
-                    geometric.pointTranslate(d0.pos, d.angle, d.speed)
-                  ]);
+          // this is meaningful only for infected individuals (color=red)
+          // we have just kept it -1 otherwise
+          // d.infected_for = d.infected_for;
 
-            if (keep < swap) {
-              const dc = JSON.parse(JSON.stringify(d));
-              if(d.fixed){
-                d0.angle = dc.angle;
-              } else if(d0.fixed){
-                d.angle = d0.angle;
-              } else{
-                d.angle = d0.angle;
-                d.speed = d0.speed;
-                d0.angle = dc.angle;
-                d0.speed = dc.speed;
+          this.data.push(d);
+
+          return this;
+        }
+
+        // This is called for each time instant
+        // Collisions are detected in this function
+        // and parameters of balls are changed accordingly
+        tick(time_instant) {
+          // Loop through the data
+          for (let i = 0; i < this.data.length; i++) {
+            const d = this.data[i];
+            if (d.color == "red") {
+              if (d.infected_for > infected_for_g) {
+                // time to recover
+                d.color = "green";
+                d.infected_for = -1;
+              } else {
+                d.infected_for += 1;
               }
+            }
+            d.collided = false;
 
-              // Infection spreads from an infected to a susceptible person
-              if(d.color=='steelblue' && d0.color=='red'){
-                d.color = 'red';
-                d.infected_for=0;  
-              } else if(d0.color=='steelblue' && d.color=='red'){
-                d0.color = 'red';
-                d0.infected_for=0;  
-              } else{}
-              
-              d.collided = true;
-              d0.collided = true;
+            // Detect collisions
+            for (let i0 = 0; i0 < this.data.length; i0++) {
+              const d0 = this.data[i0];
+              d0.collided = false;
+
+              // Collision!
+              if (
+                i !== i0 &&
+                geometric.lineLength([d.pos, d0.pos]) < d.radius + d0.radius &&
+                !d.collided &&
+                !d0.collided
+              ) {
+                // To avoid having them stick to each other,
+                // test if moving them in each other's angles will bring them closer or farther apart
+                // If one of them is fixed, swap just the angles
+                const keep = geometric.lineLength([
+                    geometric.pointTranslate(d.pos, d.angle, d.speed),
+                    geometric.pointTranslate(d0.pos, d0.angle, d0.speed),
+                  ]),
+                  swap =
+                    d.fixed || d0.fixed
+                      ? geometric.lineLength([
+                          geometric.pointTranslate(d.pos, d0.angle, d.speed),
+                          geometric.pointTranslate(d0.pos, d.angle, d0.speed),
+                        ])
+                      : geometric.lineLength([
+                          geometric.pointTranslate(d.pos, d0.angle, d0.speed),
+                          geometric.pointTranslate(d0.pos, d.angle, d.speed),
+                        ]);
+
+                if (keep < swap) {
+                  const dc = JSON.parse(JSON.stringify(d));
+                  if (d.fixed) {
+                    d0.angle = dc.angle;
+                  } else if (d0.fixed) {
+                    d.angle = d0.angle;
+                  } else {
+                    d.angle = d0.angle;
+                    d.speed = d0.speed;
+                    d0.angle = dc.angle;
+                    d0.speed = dc.speed;
+                  }
+
+                  // Infection spreads from an infected to a susceptible person
+                  if (d.color == "steelblue" && d0.color == "red") {
+                    d.color = "red";
+                    d.infected_for = 0;
+                  } else if (d0.color == "steelblue" && d.color == "red") {
+                    d0.color = "red";
+                    d0.infected_for = 0;
+                  } else {
+                  }
+
+                  d.collided = true;
+                  d0.collided = true;
+                }
+
+                break;
+              }
             }
 
-            break;
+            // Detect outer walls
+            if (d.pos[0] <= d.radius || d.pos[0] >= this.width - d.radius) {
+              // Is it moving more towards the middle or away from it?
+              const t0 = geometric.pointTranslate(d.pos, d.angle, d.speed);
+              const l0 = geometric.lineLength([this.center, t0]);
+
+              const reflected = geometric.angleReflect(d.angle, 90);
+              const t1 = geometric.pointTranslate(d.pos, reflected, d.speed);
+              const l1 = geometric.lineLength([this.center, t1]);
+
+              if (l1 < l0) d.angle = reflected;
+            }
+
+            // Detect vertical walls
+            if (d.pos[1] <= d.radius || d.pos[1] >= this.height - d.radius) {
+              // Is it moving more towards the middle or away from it?
+              const t0 = geometric.pointTranslate(d.pos, d.angle, d.speed);
+              const l0 = geometric.lineLength([this.center, t0]);
+
+              const reflected = geometric.angleReflect(d.angle, 0);
+              const t1 = geometric.pointTranslate(d.pos, reflected, d.speed);
+              const l1 = geometric.lineLength([this.center, t1]);
+
+              if (l1 < l0) d.angle = reflected;
+            }
+
+            d.pos = geometric.pointTranslate(d.pos, d.angle, d.speed);
+          }
+        }
+      }
+
+      // Initiate a simulation
+      let mySimulationT = (_) => {
+        let simulation = new Simulation();
+
+        // Initialize this simulation with simulation.init
+        // You can pass an optional configuration object to init with the properties:
+        //   - width
+        //   - height
+        simulation.init();
+
+        let num_balls = num_balls_g;
+        let fixed_balls = Math.round(fraction_fixed_g * num_balls);
+        let rand_ind = [];
+        while (rand_ind.length < fixed_balls) {
+          let r = Math.floor(Math.random() * num_balls) + 1;
+          if (rand_ind.indexOf(r) === -1) rand_ind.push(r);
+        }
+
+        // We'll create num_balls circles of random radii, moving in random directions at random speeds.
+        for (let i = 0; i < num_balls; i++) {
+          const radius = 8;
+
+          let color_here = "steelblue";
+          let days_of_infection = -1;
+
+          // one infected individual in the beginning
+          if (i == 0) {
+            color_here = "red";
+            days_of_infection = 0;
+          }
+
+          // Add a circle to your simulation with simulation.add
+          if (rand_ind.includes(i)) {
+            // if the ball is fixed
+            simulation.add({
+              speed: 0,
+              angle: d3.randomUniform(0, 360)(),
+              pos: [
+                d3.randomUniform(radius, simulation.width - radius)(),
+                d3.randomUniform(radius, simulation.height - radius)(),
+              ],
+              color: color_here,
+              infected_for: days_of_infection,
+              fixed: true,
+              radius,
+            });
+          } else {
+            simulation.add({
+              speed: d3.randomUniform(1, 2)(),
+              angle: d3.randomUniform(0, 360)(),
+              pos: [
+                d3.randomUniform(radius, simulation.width - radius)(),
+                d3.randomUniform(radius, simulation.height - radius)(),
+              ],
+              color: color_here,
+              infected_for: days_of_infection,
+              fixed: false,
+              radius,
+            });
           }
         }
 
-        // Detect outer walls
-        if (d.pos[0] <= d.radius || d.pos[0] >= this.width - d.radius){
+        return simulation;
+      };
 
-          // Is it moving more towards the middle or away from it?
-          const t0 = geometric.pointTranslate(d.pos, d.angle, d.speed);
-          const l0 = geometric.lineLength([this.center, t0]);
+      let mySimulation = mySimulationT();
 
-          const reflected = geometric.angleReflect(d.angle, 90);
-          const t1 = geometric.pointTranslate(d.pos, reflected, d.speed);
-          const l1 = geometric.lineLength([this.center, t1]);
+      // Draw the simulation
+      const wrapper = document.getElementById("simulation");
+      let canvas = document.createElement("canvas");
+      canvas.width = mySimulation.width;
+      canvas.height = mySimulation.height;
+      canvas.style.background = "black";
+      wrapper.appendChild(canvas);
+      let ctx = canvas.getContext("2d");
+      ctx.fillStyle = "steelblue";
+      ctx.strokeStyle = "white";
 
-          if (l1 < l0) d.angle = reflected;
+      function tick() {
+        requestAnimationFrame(tick);
+        ctx.clearRect(0, 0, mySimulation.width, mySimulation.height);
+
+        // The simulation.tick method advances the simulation one tick
+        mySimulation.tick();
+        for (let i = 0, l = mySimulation.data.length; i < l; i++) {
+          let d = mySimulation.data[i];
+          ctx.beginPath();
+          ctx.arc(...d.pos, d.radius, 0, 2 * Math.PI);
+          ctx.fillStyle = d.color;
+          ctx.fill();
+          ctx.stroke();
         }
-
-        // Detect vertical walls
-        if (d.pos[1] <= d.radius || d.pos[1] >= this.height - d.radius){
-          
-          // Is it moving more towards the middle or away from it?
-          const t0 = geometric.pointTranslate(d.pos, d.angle, d.speed);
-          const l0 = geometric.lineLength([this.center, t0]);
-
-          const reflected = geometric.angleReflect(d.angle, 0);
-          const t1 = geometric.pointTranslate(d.pos, reflected, d.speed);
-          const l1 = geometric.lineLength([this.center, t1]);
-
-          if (l1 < l0) d.angle = reflected;
-        }
-
-        d.pos = geometric.pointTranslate(d.pos, d.angle, d.speed);
       }
-    }
-  }
 
-  // Initiate a simulation
-  const mySimulation = (_ => {
-    const simulation = new Simulation;
-    
-    // Initialize this simulation with simulation.init
-    // You can pass an optional configuration object to init with the properties:
-    //   - width
-    //   - height
-    simulation.init();
+      tick();
 
-    let num_balls=150;
-    let fixed_balls=Math.round(0.5*num_balls);
-    let rand_ind = [];
-    while(rand_ind.length < fixed_balls){
-      let r = Math.floor(Math.random() * num_balls)+1;
-      if(rand_ind.indexOf(r) === -1) rand_ind.push(r);
-    }
-    
-    // We'll create num_balls circles of random radii, moving in random directions at random speeds.
-    for (let i = 0; i < num_balls; i++){
-      const radius = 8;
-      
-      let color_here='steelblue';
-      let days_of_infection=-1;
-      
-      // one infected individual in the beginning
-      if(i==0){
-        color_here='red';
-        days_of_infection=0;
+      // change simulation model (global vars) and re-draw the canvas
+      function modifySIM(people, infectionp, fractionfixed) {
+        num_balls_g = people;
+        infected_for_g = infectionp;
+        fraction_fixed_g = fractionfixed;
+
+        mySimulation = mySimulationT();
+
+        canvas = document.getElementsByTagName("canvas")[0];
+        ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.background = "black";
+        ctx.fillStyle = "steelblue";
+        ctx.strokeStyle = "white";
+        return false;
       }
-      
-      // Add a circle to your simulation with simulation.add
-      if(rand_ind.includes(i)){ // if the ball is fixed
-        simulation.add({
-            speed: 0,
-            angle: d3.randomUniform(0, 360)(),
-            pos: [
-            d3.randomUniform(radius, simulation.width - radius)(),
-            d3.randomUniform(radius, simulation.height - radius)()
-            ],
-            color: color_here,
-            infected_for: days_of_infection,
-            fixed: true,
-            radius
-        });
-      } else{
-        simulation.add({
-            speed: d3.randomUniform(1, 2)(),
-            angle: d3.randomUniform(0, 360)(),
-            pos: [
-            d3.randomUniform(radius, simulation.width - radius)(),
-            d3.randomUniform(radius, simulation.height - radius)()
-            ],
-            color: color_here,
-            infected_for: days_of_infection,
-            fixed: false,
-            radius
-        });
+
+      // Reset default params on button click
+      function resetDefaults() {
+        document.getElementById("people").value = num_balls_default;
+        document.getElementById("infectionp").value = infected_for_default;
+        document.getElementById("fractionfixed").value = fraction_fixed_default;
+
+        num_balls_g = num_balls_default;
+        infected_for_g = infected_for_default;
+        fraction_fixed_g = fraction_fixed_default;
+
+        mySimulation = mySimulationT();
+
+        canvas = document.getElementsByTagName("canvas")[0];
+        ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        canvas.style.background = "black";
+        ctx.fillStyle = "steelblue";
+        ctx.strokeStyle = "white";
       }
-    }
-    
-    return simulation;
-  })();
+    </script>
 
-  // Draw the simulation
-  const wrapper = document.getElementById("simulation");
-  const canvas = document.createElement("canvas");
-  canvas.width = mySimulation.width;
-  canvas.height = mySimulation.height;
-  canvas.style.background = "black";
-  wrapper.appendChild(canvas);
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "steelblue";
-  ctx.strokeStyle = "white";
-
-  function tick(){
-    time_instant+=1;
-    requestAnimationFrame(tick);
-    ctx.clearRect(0, 0, mySimulation.width, mySimulation.height);
-
-    // The simulation.tick method advances the simulation one tick
-    mySimulation.tick(time_instant);
-    for (let i = 0, l = mySimulation.data.length; i < l; i++){
-      const d = mySimulation.data[i];
-      ctx.beginPath();
-      ctx.arc(...d.pos, d.radius, 0, 2 * Math.PI);
-      ctx.fillStyle=d.color;
-      ctx.fill();   
-      ctx.stroke();
-    }
-  }
-
-  // Let us keep an incrementing time instant variable
-  // for simulation's tick function calls 
-  var time_instant=0;
-  tick();
-
-  </script>
-</body>
+    <!-- Bootstrap 4 JS -->
+    <script
+      src="https://code.jquery.com/jquery-3.2.1.slim.min.js"
+      integrity="sha384-KJ3o2DKtIkvYIK3UENzmM7KCkRr/rE9/Qpg6aAZGJwFDMVNA/GpGFF93hXpG5KkN"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.min.js"
+      integrity="sha384-ApNbgh9B+Y1QKtv3Rn7W3mgPxhU9K/ScQsAP7hUibX39j7fakFPskvXusvfa0b4Q"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.min.js"
+      integrity="sha384-JZR6Spejh4U02d8jOt6vLEHfe/JQGiRRSQQxSfFWpi1MquVdAyjUar5+76PVCmYl"
+      crossorigin="anonymous"
+    ></script>
+  </body>
 </html>
-
